@@ -18,20 +18,37 @@ public class FragmentClient {
     }
 
     /**
-     * TODO: Initialize JDBC connections to all N Fragments.
+     * Initialize JDBC connections to all N fragments.
      */
     public void setupConnections() {
-		
-	
+        try {
+            for (int i = 0; i < numFragments; i++) {
+                String url = "jdbc:postgresql://localhost:5432/frag" + i;
+                Connection conn = DriverManager.getConnection(url, USER, PASSWORD);
+                connectionPool.put(i, conn);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-    /**
-     * TODO: Route the student to the correct shard and execute the INSERT.
+     /**
+     * Insert a student into the correct fragment.
      */
     public void insertStudent(String studentId, String name, int age, String email) {
         try {
-            // Your code here:
-            
+            int fid = router.getFragmentId(studentId);
+            Connection conn = connectionPool.get(fid);
+
+            PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO Student (student_id, name, age, email) VALUES (?, ?, ?, ?)"
+            );
+            ps.setString(1, studentId);
+            ps.setString(2, name);
+            ps.setInt(3, age);
+            ps.setString(4, email);
+            ps.executeUpdate();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
