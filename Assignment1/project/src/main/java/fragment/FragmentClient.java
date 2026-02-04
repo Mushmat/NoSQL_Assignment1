@@ -3,12 +3,14 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 public class FragmentClient {
-    private static final String USER = "";
-    private static final String PASSWORD = "";
+    private static final String USER = "postgres";
+    private static final String PASSWORD = "123456";
     private Map<Integer, Connection> connectionPool;
     private Router router;
     private int numFragments;
@@ -24,10 +26,10 @@ public class FragmentClient {
     /**
      * Initialize JDBC connections to all N fragments.
      */
-    public void setupConnections() {
+        public void setupConnections() {
         try {
             for (int i = 0; i < numFragments; i++) {
-                String url = "jdbc:postgresql://localhost:5432/baseline";
+                String url = "jdbc:postgresql://localhost:5432/frag" + i;
                 Connection conn = DriverManager.getConnection(url, USER, PASSWORD);
                 connectionPool.put(i, conn);
             }
@@ -155,32 +157,33 @@ public class FragmentClient {
     /**
      * TODO: Calculate the average score per department.
      */
-    public String getAvgScoreByDept() {
+        public String getAvgScoreByDept() {
         try {
-            Random rand = new Random();
-            int fid = rand.nextInt(numFragments);
+            Map<String, List<Integer>> map = new HashMap<>();
 
-            Connection conn = connectionPool.get(fid);
+            for (Connection conn : connectionPool.values()) {
+                PreparedStatement ps = conn.prepareStatement(
+                    "SELECT c.department, g.score " +
+                    "FROM Grade g JOIN Course c ON g.course_id = c.course_id"
+                );
+                ResultSet rs = ps.executeQuery();
 
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT c.department, AVG(g.score) AS avg_score " +
-                "FROM Grade g JOIN Course c " +
-                "ON g.course_id = c.course_id " +
-                "GROUP BY c.department"
-            );
-
-            ResultSet rs = ps.executeQuery();
-            StringBuilder sb = new StringBuilder();
-
-            while (rs.next()) {
-                if (sb.length() > 0) sb.append(";");
-
-                sb.append(rs.getString("department"))
-                  .append(":")
-                  .append(rs.getDouble("avg_score"));
+                while (rs.next()) {
+                    map.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
+                    .add(rs.getInt(2));
+                }
             }
 
-            return sb.toString();
+            StringBuilder sb = new StringBuilder();
+            for (String dept : map.keySet()) {
+                double avg = map.get(dept).stream().mapToInt(i -> i).average().orElse(0);
+                sb.append(dept)
+                .append(":")
+                .append(String.format("%.1f", avg))
+                .append(";");
+            }
+
+            return sb.length() == 0 ? "" : sb.substring(0, sb.length() - 1);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -192,40 +195,34 @@ public class FragmentClient {
      * TODO: Find all the students that have taken most number of courses
      */
     public String getAllStudentsWithMostCourses() {
-        try {
-            Random rand = new Random();
-            int fid = rand.nextInt(numFragments);
+    try {
+        Map<String, Integer> count = new HashMap<>();
 
-            Connection conn = connectionPool.get(fid);
-
+        for (Connection conn : connectionPool.values()) {
             PreparedStatement ps = conn.prepareStatement(
-                "SELECT student_id " +
-                "FROM Grade " +
-                "GROUP BY student_id " +
-                "HAVING COUNT(course_id) = (" +
-                "   SELECT MAX(cnt) FROM (" +
-                "       SELECT COUNT(course_id) AS cnt " +
-                "       FROM Grade " +
-                "       GROUP BY student_id" +
-                "   ) sub" +
-                ")"
+                "SELECT student_id, COUNT(*) cnt FROM Grade GROUP BY student_id"
             );
-
             ResultSet rs = ps.executeQuery();
-            StringBuilder sb = new StringBuilder();
 
             while (rs.next()) {
-                if (sb.length() > 0) sb.append(";");
-                sb.append(rs.getString("student_id"));
+                count.merge(rs.getString(1), rs.getInt(2), Integer::sum);
             }
-
-            return sb.toString();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "ERROR";
         }
+
+        int max = count.values().stream().max(Integer::compare).orElse(0);
+
+        StringBuilder sb = new StringBuilder();
+        for (String s : count.keySet()) {
+            if (count.get(s) == max) sb.append(s).append(";");
+        }
+
+        return sb.length() == 0 ? "" : sb.substring(0, sb.length() - 1);
+
+    } catch (Exception e) {
+        e.printStackTrace();
+        return "ERROR";
     }
+}
 
     public void closeConnections() {
         try {
