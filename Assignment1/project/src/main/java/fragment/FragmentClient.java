@@ -35,6 +35,7 @@ public class FragmentClient {
             }
         } catch (Exception e) {
             e.printStackTrace();
+            System.exit(1);
         }
     }
 
@@ -47,8 +48,10 @@ public class FragmentClient {
             Connection conn = connectionPool.get(fragment_id);
 
             PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO Student (student_id, name, age, email) VALUES (?, ?, ?, ?)"
-            );
+                "INSERT INTO Student (student_id, name, age, email) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON CONFLICT (student_id) DO NOTHING"
+            );  
 
             ps.setString(1, studentId);
             ps.setString(2, name);
@@ -68,9 +71,10 @@ public class FragmentClient {
             Connection conn = connectionPool.get(fragment_id);
 
             PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO Grade (student_id, course_id, score) " +
-                "VALUES (?, ?, ?)"
-            );
+            "INSERT INTO Grade (student_id, course_id, score) " +
+            "VALUES (?, ?, ?) " +
+            "ON CONFLICT (student_id, course_id) DO NOTHING"
+        );
 
             ps.setString(1, studentId);
             ps.setString(2, courseId);
