@@ -163,31 +163,30 @@ public class FragmentClient {
      */
         public String getAvgScoreByDept() {
         try {
-            Map<String, List<Integer>> map = new HashMap<>();
+            Random rand = new Random();
+            int fid = rand.nextInt(numFragments);
 
-            for (Connection conn : connectionPool.values()) {
-                PreparedStatement ps = conn.prepareStatement(
-                    "SELECT c.department, g.score " +
-                    "FROM Grade g JOIN Course c ON g.course_id = c.course_id"
-                );
-                ResultSet rs = ps.executeQuery();
+            Connection conn = connectionPool.get(fid);
 
-                while (rs.next()) {
-                    map.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
-                    .add(rs.getInt(2));
-                }
-            }
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT c.department, AVG(g.score) AS avg_score " +
+                            "FROM Grade g JOIN Course c " +
+                            "ON g.course_id = c.course_id " +
+                            "GROUP BY c.department");
 
+            ResultSet rs = ps.executeQuery();
             StringBuilder sb = new StringBuilder();
-            for (String dept : map.keySet()) {
-                double avg = map.get(dept).stream().mapToInt(i -> i).average().orElse(0);
-                sb.append(dept)
-                .append(":")
-                .append(String.format("%.1f", avg))
-                .append(";");
+
+            while (rs.next()) {
+                if (sb.length() > 0)
+                    sb.append(";");
+
+                sb.append(rs.getString("department"))
+                        .append(":")
+                        .append(rs.getDouble("avg_score"));
             }
 
-            return sb.length() == 0 ? "" : sb.substring(0, sb.length() - 1);
+            return sb.toString();
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -199,34 +198,40 @@ public class FragmentClient {
      * TODO: Find all the students that have taken most number of courses
      */
     public String getAllStudentsWithMostCourses() {
-    try {
-        Map<String, Integer> count = new HashMap<>();
+        try {
+            Random rand = new Random();
+            int fid = rand.nextInt(numFragments);
 
-        for (Connection conn : connectionPool.values()) {
+            Connection conn = connectionPool.get(fid);
+
             PreparedStatement ps = conn.prepareStatement(
-                "SELECT student_id, COUNT(*) cnt FROM Grade GROUP BY student_id"
-            );
+                    "SELECT student_id " +
+                            "FROM Grade " +
+                            "GROUP BY student_id " +
+                            "HAVING COUNT(course_id) = (" +
+                            "   SELECT MAX(cnt) FROM (" +
+                            "       SELECT COUNT(course_id) AS cnt " +
+                            "       FROM Grade " +
+                            "       GROUP BY student_id" +
+                            "   ) sub" +
+                            ")");
+
             ResultSet rs = ps.executeQuery();
+            StringBuilder sb = new StringBuilder();
 
             while (rs.next()) {
-                count.merge(rs.getString(1), rs.getInt(2), Integer::sum);
+                if (sb.length() > 0)
+                    sb.append(";");
+                sb.append(rs.getString("student_id"));
             }
+
+            return sb.toString();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "ERROR";
         }
-
-        int max = count.values().stream().max(Integer::compare).orElse(0);
-
-        StringBuilder sb = new StringBuilder();
-        for (String s : count.keySet()) {
-            if (count.get(s) == max) sb.append(s).append(";");
-        }
-
-        return sb.length() == 0 ? "" : sb.substring(0, sb.length() - 1);
-
-    } catch (Exception e) {
-        e.printStackTrace();
-        return "ERROR";
     }
-}
 
     public void closeConnections() {
         try {
