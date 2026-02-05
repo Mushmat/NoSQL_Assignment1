@@ -1,16 +1,11 @@
 package fragment;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+
+import java.sql.*;
+import java.util.*;
+
 public class FragmentClient {
-    private static final String USER = "postgres";
-    private static final String PASSWORD = "123456";
+    private static final String USER = "";
+    private static final String PASSWORD = "";
     private Map<Integer, Connection> connectionPool;
     private Router router;
     private int numFragments;
@@ -26,33 +21,28 @@ public class FragmentClient {
     /**
      * Initialize JDBC connections to all N fragments.
      */
-        public void setupConnections() {
+    public void setupConnections() {
         try {
             for (int i = 0; i < numFragments; i++) {
-                String url = "jdbc:postgresql://localhost:5432/frag" + i;
+                String url = "jdbc:postgresql://localhost:5432/baseline";
                 Connection conn = DriverManager.getConnection(url, USER, PASSWORD);
                 connectionPool.put(i, conn);
             }
         } catch (Exception e) {
             e.printStackTrace();
-            System.exit(1);
         }
     }
 
-     /**
+    /**
      * Insert a student into the correct fragment.
      */
     public void insertStudent(String studentId, String name, int age, String email) {
         try {
-            int fragment_id = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fragment_id);
+            int fid = router.getFragmentId(studentId);
+            Connection conn = connectionPool.get(fid);
 
             PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO Student (student_id, name, age, email) " +
-                "VALUES (?, ?, ?, ?) " +
-                "ON CONFLICT (student_id) DO NOTHING"
-            );  
-
+                    "INSERT INTO Student (student_id, name, age, email) VALUES (?, ?, ?, ?)");
             ps.setString(1, studentId);
             ps.setString(2, name);
             ps.setInt(3, age);
@@ -64,63 +54,59 @@ public class FragmentClient {
         }
     }
 
-    // Written by Gautam IMT2023082
+    /**
+     * TODO: Route the grade to the correct shard and execute the INSERT.
+     */
     public void insertGrade(String studentId, String courseId, int score) {
         try {
-            int fragment_id = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fragment_id);
+            int fid = router.getFragmentId(studentId);
+            Connection conn = connectionPool.get(fid);
 
             PreparedStatement ps = conn.prepareStatement(
-            "INSERT INTO Grade (student_id, course_id, score) " +
-            "VALUES (?, ?, ?) " +
-            "ON CONFLICT (student_id, course_id) DO NOTHING"
-        );
+                    "INSERT INTO Grade (student_id, course_id, score) " +
+                            "VALUES (?, ?, ?)");
 
             ps.setString(1, studentId);
             ps.setString(2, courseId);
             ps.setInt(3, score);
 
             ps.executeUpdate();
-        }
 
-        catch (Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // Written by Gautam IMT2023082
-    public void updateGrade(String studentId, String courseId, int newScore) {
+    public void updateGrade(String studentId,
+            String courseId, int newScore) {
         try {
-            int fragment_id = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fragment_id);
+            int fid = router.getFragmentId(studentId);
+            Connection conn = connectionPool.get(fid);
 
             PreparedStatement ps = conn.prepareStatement(
-                "UPDATE Grade SET score = ? " +
-                "WHERE student_id = ? AND course_id = ?"
-            );
+                    "UPDATE Grade SET score = ? " +
+                            "WHERE student_id = ? AND course_id = ?");
 
             ps.setInt(1, newScore);
             ps.setString(2, studentId);
             ps.setString(3, courseId);
 
             ps.executeUpdate();
-        }
 
-        catch (Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
     public void deleteStudentFromCourse(String studentId,
-                                        String courseId) {
+            String courseId) {
         try {
             int fid = router.getFragmentId(studentId);
             Connection conn = connectionPool.get(fid);
 
             PreparedStatement ps = conn.prepareStatement(
-                "DELETE FROM Grade " +
-                "WHERE student_id = ? AND course_id = ?"
-            );
+                    "DELETE FROM Grade " +
+                            "WHERE student_id = ? AND course_id = ?");
 
             ps.setString(1, studentId);
             ps.setString(2, courseId);
@@ -132,22 +118,24 @@ public class FragmentClient {
         }
     }
 
+    /**
+     * TODO: Fetch the student's name and email.
+     */
     public String getStudentProfile(String studentId) {
         try {
             int fid = router.getFragmentId(studentId);
             Connection conn = connectionPool.get(fid);
 
             PreparedStatement ps = conn.prepareStatement(
-                "SELECT name, email FROM Student " +
-                "WHERE student_id = ?"
-            );
+                    "SELECT name, email FROM Student " +
+                            "WHERE student_id = ?");
 
             ps.setString(1, studentId);
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
                 return rs.getString("name") + "," +
-                       rs.getString("email");
+                        rs.getString("email");
             }
 
             return "";
@@ -161,7 +149,7 @@ public class FragmentClient {
     /**
      * TODO: Calculate the average score per department.
      */
-        public String getAvgScoreByDept() {
+    public String getAvgScoreByDept() {
         try {
             Random rand = new Random();
             int fid = rand.nextInt(numFragments);
@@ -236,10 +224,12 @@ public class FragmentClient {
     public void closeConnections() {
         try {
             for (Connection conn : connectionPool.values()) {
-                if (conn != null) conn.close();
+                if (conn != null)
+                    conn.close();
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
+
 }
