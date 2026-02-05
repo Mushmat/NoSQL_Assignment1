@@ -1,240 +1,173 @@
 package fragment;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+
+import java.sql.*;
+import java.util.*;
+import java.util.stream.Collectors;
+
 public class FragmentClient {
-    private static final String USER = "postgres";
-    private static final String PASSWORD = "123456";
-    private Map<Integer, Connection> connectionPool;
-    private Router router;
-    private int numFragments;
+    private static final String DB_USER = "postgres";
+    private static final String DB_PASS = "123456";
+    private static final String BASE_URL = "jdbc:postgresql://localhost:5432/frag";
+
+    private final Map<Integer, Connection> shardMap;
+    private final Router shardRouter;
+    private final int totalFragments;
 
     public FragmentClient(int numFragments) {
-
-        this.numFragments = numFragments;
-        this.router = new Router(numFragments);
-        this.connectionPool = new HashMap<>();
-
+        this.totalFragments = numFragments;
+        this.shardRouter = new Router(numFragments);
+        this.shardMap = new HashMap<>();
     }
 
     /**
-     * Initialize JDBC connections to all N fragments.
+     * Establishes connections to all database shards.
      */
-        public void setupConnections() {
+    public void setupConnections() {
         try {
-            for (int i = 0; i < numFragments; i++) {
-                String url = "jdbc:postgresql://localhost:5432/frag" + i;
-                Connection conn = DriverManager.getConnection(url, USER, PASSWORD);
-                connectionPool.put(i, conn);
+            for (int i = 0; i < totalFragments; i++) {
+                String connectionUrl = BASE_URL + i;
+                Connection conn = DriverManager.getConnection(connectionUrl, DB_USER, DB_PASS);
+                shardMap.put(i, conn);
             }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (SQLException e) {
+            System.err.println("Failed to initialize database connections: " + e.getMessage());
             System.exit(1);
         }
     }
 
-     /**
-     * Insert a student into the correct fragment.
+    /**
+     * Routes and inserts a student record into the appropriate shard.
      */
-    public void insertStudent(String studentId, String name, int age, String email) {
-        try {
-            int fragment_id = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fragment_id);
-
-            PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO Student (student_id, name, age, email) " +
-                "VALUES (?, ?, ?, ?) " +
-                "ON CONFLICT (student_id) DO NOTHING"
-            );  
-
-            ps.setString(1, studentId);
-            ps.setString(2, name);
-            ps.setInt(3, age);
-            ps.setString(4, email);
-            ps.executeUpdate();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    public void insertStudent(String id, String name, int age, String email) {
+        String sql = "INSERT INTO Student (student_id, name, age, email) VALUES (?, ?, ?, ?) " +
+                     "ON CONFLICT (student_id) DO NOTHING";
+        
+        executeShardUpdate(id, sql, id, name, age, email);
     }
 
-    // Written by Gautam IMT2023082
     public void insertGrade(String studentId, String courseId, int score) {
-        try {
-            int fragment_id = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fragment_id);
-
-            PreparedStatement ps = conn.prepareStatement(
-            "INSERT INTO Grade (student_id, course_id, score) " +
-            "VALUES (?, ?, ?) " +
-            "ON CONFLICT (student_id, course_id) DO NOTHING"
-        );
-
-            ps.setString(1, studentId);
-            ps.setString(2, courseId);
-            ps.setInt(3, score);
-
-            ps.executeUpdate();
-        }
-
-        catch (Exception e) {
-            e.printStackTrace();
-        }
+        String sql = "INSERT INTO Grade (student_id, course_id, score) VALUES (?, ?, ?) " +
+                     "ON CONFLICT (student_id, course_id) DO NOTHING";
+        
+        executeShardUpdate(studentId, sql, studentId, courseId, score);
     }
 
-    // Written by Gautam IMT2023082
     public void updateGrade(String studentId, String courseId, int newScore) {
-        try {
-            int fragment_id = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fragment_id);
-
-            PreparedStatement ps = conn.prepareStatement(
-                "UPDATE Grade SET score = ? " +
-                "WHERE student_id = ? AND course_id = ?"
-            );
-
-            ps.setInt(1, newScore);
-            ps.setString(2, studentId);
-            ps.setString(3, courseId);
-
-            ps.executeUpdate();
-        }
-
-        catch (Exception e) {
-            e.printStackTrace();
-        }
+        String sql = "UPDATE Grade SET score = ? WHERE student_id = ? AND course_id = ?";
+        
+        executeShardUpdate(studentId, sql, newScore, studentId, courseId);
     }
 
-    public void deleteStudentFromCourse(String studentId,
-                                        String courseId) {
-        try {
-            int fid = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fid);
-
-            PreparedStatement ps = conn.prepareStatement(
-                "DELETE FROM Grade " +
-                "WHERE student_id = ? AND course_id = ?"
-            );
-
-            ps.setString(1, studentId);
-            ps.setString(2, courseId);
-
-            ps.executeUpdate();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public String getStudentProfile(String studentId) {
-        try {
-            int fid = router.getFragmentId(studentId);
-            Connection conn = connectionPool.get(fid);
-
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT name, email FROM Student " +
-                "WHERE student_id = ?"
-            );
-
-            ps.setString(1, studentId);
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                return rs.getString("name") + "," +
-                       rs.getString("email");
-            }
-
-            return "";
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "ERROR";
-        }
+    public void deleteStudentFromCourse(String studentId, String courseId) {
+        String sql = "DELETE FROM Grade WHERE student_id = ? AND course_id = ?";
+        
+        executeShardUpdate(studentId, sql, studentId, courseId);
     }
 
     /**
-     * TODO: Calculate the average score per department.
+     * Retrieves student basic info from the specific shard.
      */
-        public String getAvgScoreByDept() {
+    public String getStudentProfile(String studentId) {
+        String sql = "SELECT name, email FROM Student WHERE student_id = ?";
+        int shardId = shardRouter.getFragmentId(studentId);
+
+        try (PreparedStatement ps = shardMap.get(shardId).prepareStatement(sql)) {
+            ps.setString(1, studentId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return String.format("%s,%s", rs.getString("name"), rs.getString("email"));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return "";
+    }
+
+    /**
+     * Aggregates average scores across all shards grouped by department.
+     */
+    public String getAvgScoreByDept() {
+        Map<String, List<Integer>> deptScores = new HashMap<>();
+        String query = "SELECT c.department, g.score FROM Grade g " +
+                       "JOIN Course c ON g.course_id = c.course_id";
+
         try {
-            Map<String, List<Integer>> map = new HashMap<>();
-
-            for (Connection conn : connectionPool.values()) {
-                PreparedStatement ps = conn.prepareStatement(
-                    "SELECT c.department, g.score " +
-                    "FROM Grade g JOIN Course c ON g.course_id = c.course_id"
-                );
-                ResultSet rs = ps.executeQuery();
-
-                while (rs.next()) {
-                    map.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
-                    .add(rs.getInt(2));
+            for (Connection conn : shardMap.values()) {
+                try (PreparedStatement ps = conn.prepareStatement(query);
+                     ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        deptScores.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
+                                  .add(rs.getInt(2));
+                    }
                 }
             }
 
-            StringBuilder sb = new StringBuilder();
-            for (String dept : map.keySet()) {
-                double avg = map.get(dept).stream().mapToInt(i -> i).average().orElse(0);
-                sb.append(dept)
-                .append(":")
-                .append(String.format("%.1f", avg))
-                .append(";");
-            }
+            return deptScores.entrySet().stream()
+                .map(entry -> {
+                    double avg = entry.getValue().stream().mapToInt(i -> i).average().orElse(0);
+                    return String.format("%s:%.1f", entry.getKey(), avg);
+                })
+                .collect(Collectors.joining(";"));
 
-            return sb.length() == 0 ? "" : sb.substring(0, sb.length() - 1);
-
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (SQLException e) {
             return "ERROR";
         }
     }
 
     /**
-     * TODO: Find all the students that have taken most number of courses
+     * Identifies students with the highest enrollment count across all shards.
      */
     public String getAllStudentsWithMostCourses() {
-    try {
-        Map<String, Integer> count = new HashMap<>();
+        Map<String, Integer> enrollmentCounts = new HashMap<>();
+        String query = "SELECT student_id, COUNT(*) as cnt FROM Grade GROUP BY student_id";
 
-        for (Connection conn : connectionPool.values()) {
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT student_id, COUNT(*) cnt FROM Grade GROUP BY student_id"
-            );
-            ResultSet rs = ps.executeQuery();
-
-            while (rs.next()) {
-                count.merge(rs.getString(1), rs.getInt(2), Integer::sum);
-            }
-        }
-
-        int max = count.values().stream().max(Integer::compare).orElse(0);
-
-        StringBuilder sb = new StringBuilder();
-        for (String s : count.keySet()) {
-            if (count.get(s) == max) sb.append(s).append(";");
-        }
-
-        return sb.length() == 0 ? "" : sb.substring(0, sb.length() - 1);
-
-    } catch (Exception e) {
-        e.printStackTrace();
-        return "ERROR";
-    }
-}
-
-    public void closeConnections() {
         try {
-            for (Connection conn : connectionPool.values()) {
-                if (conn != null) conn.close();
+            for (Connection conn : shardMap.values()) {
+                try (PreparedStatement ps = conn.prepareStatement(query);
+                     ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        enrollmentCounts.merge(rs.getString("student_id"), rs.getInt("cnt"), Integer::sum);
+                    }
+                }
             }
-        } catch (Exception e) {
+
+            if (enrollmentCounts.isEmpty()) return "";
+
+            int maxCourses = Collections.max(enrollmentCounts.values());
+
+            return enrollmentCounts.entrySet().stream()
+                .filter(e -> e.getValue() == maxCourses)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.joining(";"));
+
+        } catch (SQLException e) {
+            return "ERROR";
+        }
+    }
+
+    /**
+     * Generic helper to handle shard-specific updates/inserts/deletes.
+     */
+    private void executeShardUpdate(String routingKey, String sql, Object... params) {
+        int shardId = shardRouter.getFragmentId(routingKey);
+        try (PreparedStatement ps = shardMap.get(shardId).prepareStatement(sql)) {
+            for (int i = 0; i < params.length; i++) {
+                ps.setObject(i + 1, params[i]);
+            }
+            ps.executeUpdate();
+        } catch (SQLException e) {
             e.printStackTrace();
         }
+    }
+
+    public void closeConnections() {
+        shardMap.values().forEach(conn -> {
+            try {
+                if (conn != null && !conn.isClosed()) conn.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        });
     }
 }
